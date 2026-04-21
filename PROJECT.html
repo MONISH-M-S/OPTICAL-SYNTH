@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Optical Sound Synthesizer</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Bebas+Neue&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #080c10;
+    --bg2: #0d1319;
+    --panel: #101820;
+    --border: #1e3040;
+    --green: #00ff88;
+    --cyan: #00d4ff;
+    --amber: #ffaa00;
+    --red: #ff4455;
+    --dim: #3a5a6a;
+    --text: #b8d4e0;
+    --text-bright: #e8f4f8;
+    --glow-green: 0 0 12px #00ff8880, 0 0 30px #00ff8840;
+    --glow-cyan: 0 0 12px #00d4ff80, 0 0 30px #00d4ff40;
+    --glow-amber: 0 0 12px #ffaa0080, 0 0 30px #ffaa0040;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 300;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Scanlines overlay */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.08) 2px,
+      rgba(0,0,0,0.08) 4px
+    );
+    pointer-events: none;
+    z-index: 1000;
+  }
+
+  /* Noise grain */
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    opacity: 0.4;
+    pointer-events: none;
+    z-index: 999;
+  }
+
+  .page-wrap {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 48px 24px 80px;
+  }
+
+  /* ── HEADER ── */
+  header {
+    text-align: center;
+    margin-bottom: 56px;
+    position: relative;
+  }
+  header .badge {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 3px;
+    color: var(--green);
+    text-shadow: var(--glow-green);
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  header h1 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: clamp(48px, 8vw, 96px);
+    letter-spacing: 4px;
+    color: var(--text-bright);
+    line-height: 1;
+    text-shadow: 0 0 40px rgba(0,212,255,0.3);
+    position: relative;
+  }
+  header h1 span { color: var(--cyan); text-shadow: var(--glow-cyan); }
+  header .subtitle {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    color: var(--dim);
+    letter-spacing: 2px;
+    margin-top: 12px;
+  }
+  .header-line {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+    margin-top: 32px;
+    opacity: 0.4;
+  }
+
+  /* ── OSCILLOSCOPE (animated waveform) ── */
+  .scope-container {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0;
+    margin-bottom: 48px;
+    overflow: hidden;
+    position: relative;
+  }
+  .scope-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 18px;
+    border-bottom: 1px solid var(--border);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--dim);
+  }
+  .scope-header .led {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: var(--glow-green);
+    animation: blink 1.4s ease-in-out infinite;
+  }
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+  canvas#scope {
+    display: block;
+    width: 100%;
+    height: 140px;
+    background: #050c0a;
+  }
+
+  /* ── SIGNAL FLOW ── */
+  .signal-flow {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-bottom: 48px;
+    overflow-x: auto;
+    padding: 4px 0;
+  }
+  .flow-node {
+    flex: 1;
+    min-width: 100px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 14px 10px;
+    text-align: center;
+    position: relative;
+    transition: border-color 0.3s;
+  }
+  .flow-node:hover { border-color: var(--cyan); }
+  .flow-node .node-num {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 9px;
+    color: var(--dim);
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+  }
+  .flow-node .node-icon {
+    font-size: 22px;
+    margin-bottom: 6px;
+    display: block;
+  }
+  .flow-node .node-label {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--text-bright);
+    line-height: 1.4;
+  }
+  .flow-arrow {
+    flex-shrink: 0;
+    width: 32px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    position: relative;
+  }
+  .flow-arrow::before {
+    content: '';
+    height: 2px;
+    width: 100%;
+    background: linear-gradient(90deg, var(--cyan), var(--green));
+    animation: pulse-flow 1.6s linear infinite;
+    background-size: 200% 100%;
+  }
+  @keyframes pulse-flow {
+    0% { background-position: 100% 0; }
+    100% { background-position: -100% 0; }
+  }
+  .flow-arrow::after {
+    content: '▶';
+    font-size: 8px;
+    color: var(--green);
+    position: absolute;
+    right: -2px;
+    top: 50%;
+    transform: translateY(-50%);
+  }
+
+  /* ── THREE LAYERS ── */
+  .layers-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 48px;
+  }
+  @media (max-width: 640px) {
+    .layers-grid { grid-template-columns: 1fr; }
+    .signal-flow { gap: 4px; }
+    .flow-arrow { width: 16px; }
+  }
+
+  .layer-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    position: relative;
+  }
+  .layer-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+  }
+  .layer-card.physics::before { background: linear-gradient(90deg, var(--amber), #ff6600); }
+  .layer-card.logic::before  { background: linear-gradient(90deg, var(--cyan), #0088ff); }
+  .layer-card.acoustics::before { background: linear-gradient(90deg, var(--green), #00cc55); }
+
+  .layer-head {
+    padding: 18px 20px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .layer-tag {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 4px;
+  }
+  .physics .layer-tag { color: var(--amber); }
+  .logic  .layer-tag { color: var(--cyan); }
+  .acoustics .layer-tag { color: var(--green); }
+
+  .layer-title {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 26px;
+    letter-spacing: 2px;
+    color: var(--text-bright);
+    line-height: 1;
+  }
+  .layer-body {
+    padding: 16px 20px;
+  }
+  .layer-body p {
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--text);
+    margin-bottom: 12px;
+  }
+  .layer-body p:last-child { margin-bottom: 0; }
+  .layer-body strong { color: var(--text-bright); font-weight: 500; }
+
+  /* Inline formula chips */
+  .chip {
+    display: inline-block;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 7px;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--amber);
+    white-space: nowrap;
+  }
+
+  /* ── DIAGRAM: Voltage Divider ── */
+  .diagram-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 48px;
+  }
+  @media (max-width: 640px) { .diagram-row { grid-template-columns: 1fr; } }
+
+  .diagram-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 20px;
+  }
+  .diagram-card h3 {
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: var(--cyan);
+    text-shadow: var(--glow-cyan);
+    margin-bottom: 16px;
+    text-transform: uppercase;
+  }
+
+  /* SVG circuit */
+  svg.circuit { width: 100%; height: auto; display: block; }
+
+  /* ── CODE BLOCK ── */
+  .code-section {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 48px;
+  }
+  .code-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 18px;
+    border-bottom: 1px solid var(--border);
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 11px;
+    color: var(--dim);
+  }
+  .code-header .lang { color: var(--cyan); }
+  pre {
+    padding: 20px 22px;
+    overflow-x: auto;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    line-height: 1.8;
+  }
+  .c-comment { color: #3d6070; }
+  .c-kw    { color: var(--cyan); }
+  .c-type  { color: var(--amber); }
+  .c-fn    { color: var(--green); }
+  .c-num   { color: #ff8844; }
+  .c-var   { color: var(--text-bright); }
+
+  /* ── PARAM TABLE ── */
+  .param-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 12px;
+    margin-bottom: 48px;
+  }
+  .param-table th {
+    background: rgba(0,212,255,0.06);
+    color: var(--cyan);
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 10px 16px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  .param-table td {
+    padding: 10px 16px;
+    border-bottom: 1px solid rgba(30,48,64,0.5);
+    color: var(--text);
+    vertical-align: middle;
+  }
+  .param-table tr:hover td { background: rgba(255,255,255,0.02); }
+  .param-table .pin { color: var(--amber); }
+  .param-table .range { color: var(--green); }
+
+  /* ── FOOTER ── */
+  footer {
+    text-align: center;
+    font-family: 'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--dim);
+    letter-spacing: 2px;
+    padding-top: 32px;
+    border-top: 1px solid var(--border);
+  }
+</style>
+</head>
+<body>
+<div class="page-wrap">
+
+  <!-- HEADER -->
+  <header>
+    <div class="badge">▶ Arduino Project Documentation</div>
+    <h1>OPTICAL <span>SYNTH</span></h1>
+    <div class="subtitle">LDR-BASED SOUND SYNTHESIZER · SIGNAL FLOW ANALYSIS</div>
+    <div class="header-line"></div>
+  </header>
+
+  <!-- OSCILLOSCOPE -->
+  <div class="scope-container">
+    <div class="scope-header">
+      <span>OSCILLOSCOPE — OUTPUT WAVEFORM (D8)</span>
+      <div style="display:flex;align-items:center;gap:8px;"><div class="led"></div><span>LIVE</span></div>
+    </div>
+    <canvas id="scope"></canvas>
+  </div>
+
+  <!-- SIGNAL FLOW -->
+  <div class="signal-flow">
+    <div class="flow-node">
+      <div class="node-num">01</div>
+      <span class="node-icon">🔦</span>
+      <div class="node-label">Phone<br>Torch</div>
+    </div>
+    <div class="flow-arrow"></div>
+    <div class="flow-node">
+      <div class="node-num">02</div>
+      <span class="node-icon">⚡</span>
+      <div class="node-label">LDR<br>Resistance ↓</div>
+    </div>
+    <div class="flow-arrow"></div>
+    <div class="flow-node">
+      <div class="node-num">03</div>
+      <span class="node-icon">⚖️</span>
+      <div class="node-label">Voltage<br>Divider</div>
+    </div>
+    <div class="flow-arrow"></div>
+    <div class="flow-node">
+      <div class="node-num">04</div>
+      <span class="node-icon">🔢</span>
+      <div class="node-label">ADC<br>0–1023</div>
+    </div>
+    <div class="flow-arrow"></div>
+    <div class="flow-node">
+      <div class="node-num">05</div>
+      <span class="node-icon">📐</span>
+      <div class="node-label">Map()<br>→ Hz</div>
+    </div>
+    <div class="flow-arrow"></div>
+    <div class="flow-node">
+      <div class="node-num">06</div>
+      <span class="node-icon">〰️</span>
+      <div class="node-label">Square<br>Wave</div>
+    </div>
+    <div class="flow-arrow"></div>
+    <div class="flow-node">
+      <div class="node-num">07</div>
+      <span class="node-icon">🔊</span>
+      <div class="node-label">Speaker<br>Audio Out</div>
+    </div>
+  </div>
+
+  <!-- THREE LAYERS -->
+  <div class="layers-grid">
+
+    <div class="layer-card physics">
+      <div class="layer-head">
+        <div class="layer-tag">Layer 01 · Physics</div>
+        <div class="layer-title">Photo-Resistive<br>Transduction</div>
+      </div>
+      <div class="layer-body">
+        <p>The <strong>LDR</strong> is made from a high-resistance semiconductor. When photons from a phone torch strike the surface, they transfer enough energy to free electrons inside the material.</p>
+        <p>More free electrons → greater conductivity → <strong>lower resistance</strong>. This creates the inverse relationship: <span class="chip">light ↑ → Ω ↓</span></p>
+        <p>Because the Arduino cannot measure resistance directly, a <span class="chip">10kΩ</span> resistor forms a <strong>Voltage Divider</strong>, converting changing resistance into a <span class="chip">0V – 5V</span> signal.</p>
+      </div>
+    </div>
+
+    <div class="layer-card logic">
+      <div class="layer-head">
+        <div class="layer-tag">Layer 02 · Logic</div>
+        <div class="layer-title">Digital<br>Processing</div>
+      </div>
+      <div class="layer-body">
+        <p>The voltage enters <strong>Analog Pin A0</strong>. The internal <strong>ADC</strong> samples it and outputs an integer in <span class="chip">0 – 1023</span>.</p>
+        <p>The <code style="color:var(--green);font-family:'Share Tech Mono',monospace;font-size:12px;">map()</code> function translates that value to a musical frequency, e.g. a raw value of <span class="chip">800</span> becomes <span class="chip">~1500 Hz</span>.</p>
+        <p><code style="color:var(--green);font-family:'Share Tech Mono',monospace;font-size:12px;">tone()</code> uses the Arduino's internal clock to pulse <strong>Pin D8</strong> at exactly that frequency — a <strong>square wave</strong> output.</p>
+      </div>
+    </div>
+
+    <div class="layer-card acoustics">
+      <div class="layer-head">
+        <div class="layer-tag">Layer 03 · Acoustics</div>
+        <div class="layer-title">Electro-Mechanical<br>Conversion</div>
+      </div>
+      <div class="layer-body">
+        <p>An 8Ω speaker would draw dangerously high current from the Arduino pin. A <span class="chip">220Ω</span> resistor acts as a buffer, keeping current within safe limits.</p>
+        <p>Electrical pulses flow through the <strong>voice coil</strong>, creating a fluctuating magnetic field that pushes and pulls against a permanent magnet.</p>
+        <p>The resulting cone movement compresses air into <strong>longitudinal pressure waves</strong> — the sound you hear.</p>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- DIAGRAMS -->
+  <div class="diagram-row">
+
+    <!-- Voltage Divider SVG -->
+    <div class="diagram-card">
+      <h3>▸ Voltage Divider Circuit</h3>
+      <svg class="circuit" viewBox="0 0 200 280" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <!-- 5V rail -->
+        <line x1="100" y1="20" x2="100" y2="60" stroke="#ffaa00" stroke-width="2"/>
+        <text x="100" y="14" text-anchor="middle" fill="#ffaa00" font-family="Share Tech Mono" font-size="11">5V</text>
+        <!-- LDR symbol -->
+        <rect x="75" y="60" width="50" height="28" rx="2" fill="#101820" stroke="#ffaa00" stroke-width="1.5"/>
+        <text x="100" y="78" text-anchor="middle" fill="#ffaa00" font-family="Share Tech Mono" font-size="10">LDR</text>
+        <!-- Arrow through LDR (light sensitivity) -->
+        <line x1="60" y1="64" x2="72" y2="72" stroke="#ffdd66" stroke-width="1" stroke-dasharray="3,2"/>
+        <line x1="60" y1="74" x2="72" y2="82" stroke="#ffdd66" stroke-width="1" stroke-dasharray="3,2"/>
+        <text x="46" y="73" fill="#ffdd66" font-family="Share Tech Mono" font-size="9">hν</text>
+        <!-- Wire to midpoint -->
+        <line x1="100" y1="88" x2="100" y2="118" stroke="#00d4ff" stroke-width="2"/>
+        <!-- Vout tap -->
+        <circle cx="100" cy="118" r="4" fill="#00d4ff"/>
+        <line x1="100" y1="118" x2="160" y2="118" stroke="#00d4ff" stroke-width="1.5" stroke-dasharray="4,3"/>
+        <text x="166" y="122" fill="#00d4ff" font-family="Share Tech Mono" font-size="10">Vout</text>
+        <text x="166" y="134" fill="#3a5a6a" font-family="Share Tech Mono" font-size="9">→ A0</text>
+        <!-- 10kΩ resistor -->
+        <rect x="75" y="128" width="50" height="28" rx="2" fill="#101820" stroke="#00ff88" stroke-width="1.5"/>
+        <text x="100" y="147" text-anchor="middle" fill="#00ff88" font-family="Share Tech Mono" font-size="10">10kΩ</text>
+        <!-- Wire to GND -->
+        <line x1="100" y1="156" x2="100" y2="196" stroke="#3a5a6a" stroke-width="2"/>
+        <!-- GND symbol -->
+        <line x1="76" y1="196" x2="124" y2="196" stroke="#3a5a6a" stroke-width="2"/>
+        <line x1="82" y1="204" x2="118" y2="204" stroke="#3a5a6a" stroke-width="1.5"/>
+        <line x1="90" y1="212" x2="110" y2="212" stroke="#3a5a6a" stroke-width="1"/>
+        <text x="100" y="230" text-anchor="middle" fill="#3a5a6a" font-family="Share Tech Mono" font-size="10">GND</text>
+        <!-- Formula -->
+        <text x="100" y="256" text-anchor="middle" fill="#556a7a" font-family="Share Tech Mono" font-size="9">Vout = 5V × R_fixed / (R_LDR + R_fixed)</text>
+      </svg>
+    </div>
+
+    <!-- ADC Mapping -->
+    <div class="diagram-card">
+      <h3>▸ ADC → Frequency Mapping</h3>
+      <svg class="circuit" viewBox="0 0 200 280" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <!-- Y axis -->
+        <line x1="40" y1="20" x2="40" y2="210" stroke="#1e3040" stroke-width="1.5"/>
+        <!-- X axis -->
+        <line x1="40" y1="210" x2="180" y2="210" stroke="#1e3040" stroke-width="1.5"/>
+        <!-- Y label -->
+        <text x="14" y="120" fill="#3a5a6a" font-family="Share Tech Mono" font-size="9" transform="rotate(-90,14,120)">Frequency (Hz)</text>
+        <!-- X label -->
+        <text x="100" y="228" text-anchor="middle" fill="#3a5a6a" font-family="Share Tech Mono" font-size="9">ADC Value (0–1023)</text>
+        <!-- Grid lines -->
+        <line x1="40" y1="60" x2="180" y2="60" stroke="#1a2a35" stroke-width="1" stroke-dasharray="4,3"/>
+        <line x1="40" y1="130" x2="180" y2="130" stroke="#1a2a35" stroke-width="1" stroke-dasharray="4,3"/>
+        <line x1="110" y1="20" x2="110" y2="210" stroke="#1a2a35" stroke-width="1" stroke-dasharray="4,3"/>
+        <!-- Y ticks -->
+        <text x="34" y="64" text-anchor="end" fill="#3a5a6a" font-family="Share Tech Mono" font-size="8">2500</text>
+        <text x="34" y="134" text-anchor="end" fill="#3a5a6a" font-family="Share Tech Mono" font-size="8">1300</text>
+        <text x="34" y="213" text-anchor="end" fill="#3a5a6a" font-family="Share Tech Mono" font-size="8">150</text>
+        <!-- X ticks -->
+        <text x="40" y="222" text-anchor="middle" fill="#3a5a6a" font-family="Share Tech Mono" font-size="8">0</text>
+        <text x="110" y="222" text-anchor="middle" fill="#3a5a6a" font-family="Share Tech Mono" font-size="8">512</text>
+        <text x="180" y="222" text-anchor="middle" fill="#3a5a6a" font-family="Share Tech Mono" font-size="8">1023</text>
+        <!-- Mapping line -->
+        <line x1="40" y1="210" x2="180" y2="60" stroke="url(#mapGrad)" stroke-width="2.5" stroke-linecap="round"/>
+        <defs>
+          <linearGradient id="mapGrad" x1="40" y1="210" x2="180" y2="60" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#00ff88"/>
+            <stop offset="100%" stop-color="#00d4ff"/>
+          </linearGradient>
+        </defs>
+        <!-- Example dot -->
+        <circle cx="137" cy="97" r="5" fill="#00d4ff" opacity="0.9"/>
+        <line x1="137" y1="97" x2="137" y2="210" stroke="#00d4ff" stroke-width="1" stroke-dasharray="3,2" opacity="0.5"/>
+        <line x1="40" y1="97" x2="137" y2="97" stroke="#00d4ff" stroke-width="1" stroke-dasharray="3,2" opacity="0.5"/>
+        <text x="140" y="93" fill="#00d4ff" font-family="Share Tech Mono" font-size="8">800 → 1500Hz</text>
+        <!-- map() label -->
+        <rect x="55" y="160" width="90" height="22" rx="2" fill="#0d1319" stroke="#1e3040" stroke-width="1"/>
+        <text x="100" y="175" text-anchor="middle" fill="#00ff88" font-family="Share Tech Mono" font-size="10">map(x, 200, 950, 150, 2500)</text>
+      </svg>
+    </div>
+
+  </div>
+
+  <!-- CODE -->
+  <div class="code-section">
+    <div class="code-header">
+      <span>optical_synth.ino</span>
+      <span class="lang">Arduino C++</span>
+    </div>
+    <pre><span class="c-comment">// ── Pin Definitions ──────────────────────────────────</span>
+<span class="c-kw">const</span> <span class="c-type">int</span> <span class="c-var">speakerPin</span> = <span class="c-num">8</span>;
+<span class="c-kw">const</span> <span class="c-type">int</span> <span class="c-var">pitchLDR</span>   = <span class="c-num">A0</span>;  <span class="c-comment">// Controls Pitch</span>
+<span class="c-kw">const</span> <span class="c-type">int</span> <span class="c-var">modLDR</span>     = <span class="c-num">A1</span>;  <span class="c-comment">// Controls Tempo/Stutter</span>
+
+<span class="c-type">void</span> <span class="c-fn">setup</span>() {
+  <span class="c-fn">pinMode</span>(<span class="c-var">speakerPin</span>, OUTPUT);
+  <span class="c-fn">Serial.begin</span>(<span class="c-num">9600</span>);
+}
+
+<span class="c-type">void</span> <span class="c-fn">loop</span>() {
+  <span class="c-comment">// 1. Read raw ADC values (0–1023)</span>
+  <span class="c-type">int</span> <span class="c-var">pitchRaw</span> = <span class="c-fn">analogRead</span>(<span class="c-var">pitchLDR</span>);
+  <span class="c-type">int</span> <span class="c-var">modRaw</span>   = <span class="c-fn">analogRead</span>(<span class="c-var">modLDR</span>);
+
+  <span class="c-comment">// 2. Map to audible ranges</span>
+  <span class="c-type">int</span> <span class="c-var">frequency</span>  = <span class="c-fn">map</span>(<span class="c-var">pitchRaw</span>, <span class="c-num">200</span>, <span class="c-num">950</span>, <span class="c-num">150</span>, <span class="c-num">2500</span>);
+  <span class="c-type">int</span> <span class="c-var">pulseSpeed</span> = <span class="c-fn">map</span>(<span class="c-var">modRaw</span>,   <span class="c-num">200</span>, <span class="c-num">950</span>,  <span class="c-num">10</span>,  <span class="c-num">200</span>);
+
+  <span class="c-comment">// 3. Constrain to safe values</span>
+  <span class="c-var">frequency</span>  = <span class="c-fn">constrain</span>(<span class="c-var">frequency</span>,  <span class="c-num">150</span>, <span class="c-num">2500</span>);
+  <span class="c-var">pulseSpeed</span> = <span class="c-fn">constrain</span>(<span class="c-var">pulseSpeed</span>,  <span class="c-num">10</span>,  <span class="c-num">200</span>);
+
+  <span class="c-comment">// 4. Stutter: tone ON → delay → tone OFF → delay</span>
+  <span class="c-fn">tone</span>(<span class="c-var">speakerPin</span>, <span class="c-var">frequency</span>);
+  <span class="c-fn">delay</span>(<span class="c-var">pulseSpeed</span>);
+  <span class="c-fn">noTone</span>(<span class="c-var">speakerPin</span>);
+  <span class="c-fn">delay</span>(<span class="c-var">pulseSpeed</span>);
+}</pre>
+  </div>
+
+  <!-- PARAMETER TABLE -->
+  <table class="param-table">
+    <thead>
+      <tr>
+        <th>Signal</th>
+        <th>Pin</th>
+        <th>Raw Range</th>
+        <th>Mapped Range</th>
+        <th>Role</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Pitch LDR</td>
+        <td class="pin">A0</td>
+        <td>200 – 950</td>
+        <td class="range">150 – 2500 Hz</td>
+        <td>Controls output frequency</td>
+      </tr>
+      <tr>
+        <td>Modulation LDR</td>
+        <td class="pin">A1</td>
+        <td>200 – 950</td>
+        <td class="range">10 – 200 ms</td>
+        <td>Controls stutter pulse speed</td>
+      </tr>
+      <tr>
+        <td>Speaker Output</td>
+        <td class="pin">D8</td>
+        <td>—</td>
+        <td class="range">Square wave</td>
+        <td>PWM tone via tone()</td>
+      </tr>
+      <tr>
+        <td>Current Limiter</td>
+        <td class="pin">D8 series</td>
+        <td>—</td>
+        <td class="range">220Ω</td>
+        <td>Protects output pin from 8Ω speaker</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <footer>OPTICAL SOUND SYNTHESIZER · ARDUINO UNO · LDR × 2 · D8 SPEAKER OUT</footer>
+
+</div>
+
+<!-- OSCILLOSCOPE ANIMATION -->
+<script>
+const canvas = document.getElementById('scope');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+  canvas.width = canvas.offsetWidth * devicePixelRatio;
+  canvas.height = canvas.offsetHeight * devicePixelRatio;
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+}
+resize();
+window.addEventListener('resize', resize);
+
+let t = 0;
+let freq = 1;
+let pulse = 0.5;
+
+function drawScope() {
+  const w = canvas.offsetWidth;
+  const h = canvas.offsetHeight;
+  ctx.clearRect(0, 0, w, h);
+
+  // Background
+  ctx.fillStyle = '#050c0a';
+  ctx.fillRect(0, 0, w, h);
+
+  // Grid
+  ctx.strokeStyle = '#0a2018';
+  ctx.lineWidth = 1;
+  for (let x = 0; x < w; x += w / 10) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+  }
+  for (let y = 0; y < h; y += h / 4) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+  }
+
+  // Animated freq/pulse drift
+  freq = 1.5 + Math.sin(t * 0.005) * 0.8;
+  pulse = 0.4 + Math.sin(t * 0.003) * 0.25;
+
+  // Square wave
+  const mid = h / 2;
+  const amp = h * 0.32;
+  const period = w / (freq * 3);
+  const onRatio = pulse;
+
+  ctx.beginPath();
+  ctx.strokeStyle = '#00ff88';
+  ctx.lineWidth = 2;
+  ctx.shadowColor = '#00ff88';
+  ctx.shadowBlur = 8;
+
+  let x = 0;
+  let phase = (t * freq * 0.08) % period;
+  let high = true;
+  x = -phase;
+
+  while (x < w) {
+    const onLen = period * onRatio;
+    const offLen = period * (1 - onRatio);
+
+    // High segment
+    const hx = Math.max(0, x);
+    const hxEnd = Math.min(w, x + onLen);
+    if (hx < hxEnd) {
+      ctx.moveTo(hx, mid - amp);
+      ctx.lineTo(hxEnd, mid - amp);
+      if (hxEnd < w) {
+        ctx.moveTo(hxEnd, mid - amp);
+        ctx.lineTo(hxEnd, mid + amp);
+      }
+    }
+    x += onLen;
+
+    // Low segment
+    const lx = Math.max(0, x);
+    const lxEnd = Math.min(w, x + offLen);
+    if (lx < lxEnd) {
+      ctx.moveTo(lx, mid + amp);
+      ctx.lineTo(lxEnd, mid + amp);
+      if (lxEnd < w) {
+        ctx.moveTo(lxEnd, mid + amp);
+        ctx.lineTo(lxEnd, mid - amp);
+      }
+    }
+    x += offLen;
+  }
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // Freq readout
+  const dispFreq = Math.round(150 + (freq - 0.7) / 2.3 * 2350);
+  ctx.font = '11px "Share Tech Mono"';
+  ctx.fillStyle = '#00ff88';
+  ctx.shadowColor = '#00ff88';
+  ctx.shadowBlur = 6;
+  ctx.fillText(`FREQ: ${dispFreq} Hz`, 12, 20);
+  ctx.fillStyle = '#00d4ff';
+  ctx.shadowColor = '#00d4ff';
+  ctx.fillText(`PULSE: ${Math.round(pulse * 100)}%`, 140, 20);
+  ctx.shadowBlur = 0;
+
+  t++;
+  requestAnimationFrame(drawScope);
+}
+drawScope();
+</script>
+</body>
+</html>
